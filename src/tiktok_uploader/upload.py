@@ -6,12 +6,12 @@ Key Functions
 upload_video : Uploads a single TikTok video
 upload_videos : Uploads multiple TikTok videos
 """
+import pprint
 from os.path import abspath, exists
 from typing import List
 import time
 import pytz
 import datetime
-import pyperclip
 
 from selenium.webdriver.common.by import By
 
@@ -24,7 +24,7 @@ from selenium.common.exceptions import ElementClickInterceptedException, Timeout
 from tiktok_uploader.browsers import get_browser
 from tiktok_uploader.auth import AuthBackend
 from tiktok_uploader import config, logger
-from tiktok_uploader.utils import bold, cyan, green, red
+from tiktok_uploader.utils import bold, green, red
 from tiktok_uploader.proxy_auth_extension.proxy_auth_extension import proxy_is_working
 
 
@@ -60,8 +60,8 @@ def upload_video(filename=None, description='', cookies='', schedule: datetime.d
         )
 
 
-def upload_videos(videos: list = None, auth: AuthBackend = None, proxy: dict = None, browser='chrome',
-                  browser_agent=None, on_complete=None, headless=False, num_retries : int = 1, skip_split_window=False, *args, **kwargs):
+def upload_videos(videos: list = None, auth: AuthBackend = None, proxy: dict = None, browser='firefox',
+                  browser_agent=None, on_complete=None, headless=False, num_retries : int = 1, *args, **kwargs):
     """
     Uploads multiple videos to TikTok
 
@@ -151,9 +151,8 @@ def upload_videos(videos: list = None, auth: AuthBackend = None, proxy: dict = N
                     continue
 
             complete_upload_form(driver, path, description, schedule,
-                                 num_retries=num_retries, 
-                                 skip_split_window=skip_split_window,
-                                 headless=headless,*args, **kwargs)
+                                 num_retries=num_retries, headless=headless,
+                                 *args, **kwargs)
         except Exception as exception:
             logger.error('Failed to upload %s', path)
             logger.error(exception)
@@ -168,7 +167,7 @@ def upload_videos(videos: list = None, auth: AuthBackend = None, proxy: dict = N
     return failed
 
 
-def complete_upload_form(driver, path: str, description: str, schedule: datetime.datetime, skip_split_window: bool, headless=False,  *args, **kwargs) -> None:
+def complete_upload_form(driver, path: str, description: str, schedule: datetime.datetime, headless=False, *args, **kwargs) -> None:
     """
     Actually uploads each video
 
@@ -182,8 +181,7 @@ def complete_upload_form(driver, path: str, description: str, schedule: datetime
     _go_to_upload(driver)
     #  _remove_cookies_window(driver)
     _set_video(driver, path=path, **kwargs)
-    if not skip_split_window:
-        _remove_split_window(driver)
+    #_remove_split_window(driver)
     _set_interactivity(driver, **kwargs)
     _set_description(driver, description)
     if schedule:
@@ -300,9 +298,9 @@ def _set_description(driver, description: str) -> None:
             else:
                 min_index = _get_splice_index(nearest_mention, nearest_hash, description)
 
-                pyperclip.copy(description[:min_index])
-                desc.send_keys(Keys.CONTROL, 'v')
+                desc.send_keys(description[:min_index])
                 description = description[min_index:]
+        logger.debug(green('Setting description'))
     except Exception as exception:
         print('Failed to set description: ', exception)
         _clear(desc)
@@ -348,23 +346,28 @@ def _set_video(driver, path: str = '', num_retries: int = 3, **kwargs) -> None:
                 )
 
             WebDriverWait(driver, config['explicit_wait']).until(upload_finished)
+            logger.debug(green("Video should be uploading"))
 
             # waits for the video to upload
             upload_confirmation = EC.presence_of_element_located(
                 (By.XPATH, config['selectors']['upload']['upload_confirmation'])
                 )
+            logger.debug(green("Video should be uploaded"))
+
 
             # An exception throw here means the video failed to upload an a retry is needed
-            WebDriverWait(driver, config['uploading_wait']).until(upload_confirmation)
+            WebDriverWait(driver, config['explicit_wait']).until(upload_confirmation)
+            logger.debug(green("Upload Confirmed"))
+            """
 
             # wait until a non-draggable image is found
             process_confirmation = EC.presence_of_element_located(
                 (By.XPATH, config['selectors']['upload']['process_confirmation'])
                 )
             WebDriverWait(driver, config['explicit_wait']).until(process_confirmation)
+            """
+            # logger.debug(green("Final Sanity Check... is the issue even with this function?"))
             return
-        except TimeoutException as exception:
-            print("TimeoutException occurred:\n", exception)
         except Exception as exception:
             print(exception)
 
@@ -382,7 +385,7 @@ def _remove_cookies_window(driver) -> None:
     logger.debug(green(f'Removing cookies window'))
     cookies_banner = WebDriverWait(driver, config['implicit_wait']).until(
         EC.presence_of_element_located((By.TAG_NAME, config['selectors']['upload']['cookies_banner']['banner'])))
-    
+
     item = WebDriverWait(driver, config['implicit_wait']).until(
         EC.visibility_of(cookies_banner.shadow_root.find_element(By.CSS_SELECTOR, config['selectors']['upload']['cookies_banner']['button'])))
 
@@ -402,15 +405,16 @@ def _remove_split_window(driver) -> None:
     """
     logger.debug(green(f'Removing split window'))
     window_xpath = config['selectors']['upload']['split_window']
-    
+
     try:
         condition = EC.presence_of_element_located((By.XPATH, window_xpath))
         window = WebDriverWait(driver, config['implicit_wait']).until(condition)
         window.click()
-            
+
     except TimeoutException:
         logger.debug(red(f"Split window not found or operation timed out"))
-        
+    logger.debug('removed split window')
+
 
 def _set_interactivity(driver, comment=True, stitch=True, duet=True, *args, **kwargs) -> None:
     """
@@ -442,6 +446,7 @@ def _set_interactivity(driver, comment=True, stitch=True, duet=True, *args, **kw
 
         if duet ^ duet_box.is_selected():
             duet_box.click()
+        logger.debug(green('Set interactivity settings'))
 
     except Exception as _:
         logger.error('Failed to set interactivity settings')
@@ -475,7 +480,8 @@ def _set_schedule_video(driver, schedule: datetime.datetime) -> None:
         __time_picker(driver, hour, minute)
     except Exception as e:
         msg = f'Failed to set schedule: {e}'
-        logger.error(red(msg))
+        print(msg)
+        logger.error(msg)
         raise FailedToUpload()
 
 
@@ -554,13 +560,9 @@ def __time_picker(driver, hour: int, minute: int) -> None:
     minute_option_correct_index = int(minute / 5)
     minute_to_click = minute_options[minute_option_correct_index]
 
-    time.sleep(1) # temporay fix => might be better to use an explicit wait
     driver.execute_script("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", hour_to_click)
-    time.sleep(1) # temporay fix => might be better to use an explicit wait
     hour_to_click.click()
-
     driver.execute_script("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", minute_to_click)
-    time.sleep(2) # temporary fixed => Might be better to use an explicit wait
     minute_to_click.click()
 
     # click somewhere else to close the time picker
@@ -581,6 +583,7 @@ def __verify_time_picked_is_correct(driver, hour: int, minute: int):
         msg = f'Something went wrong with the time picker, ' \
               f'expected {hour:02d}:{minute:02d} ' \
               f'but got {time_selected_hour:02d}:{time_selected_minute:02d}'
+        logger.error(msg)
         raise Exception(msg)
 
 
@@ -594,19 +597,45 @@ def _post_video(driver) -> None:
     """
     logger.debug(green('Clicking the post button'))
 
+    driver.set_window_size(1920, 1080)
+
     try:
-        post = WebDriverWait(driver, config['implicit_wait']).until(EC.element_to_be_clickable((By.XPATH, config['selectors']['upload']['post'])))
-        driver.execute_script("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", post)
-        post.click()
+
+        # post_button_xpath = config['selectors']['upload']['post']
+        post_button_xpath = config['selectors']['upload']['upload_finished']
+
+        # pprint.pprint(config)
+
+        # Find the button element
+        post_button = WebDriverWait(driver, config['implicit_wait']).until(
+            EC.element_to_be_clickable((By.XPATH, post_button_xpath))
+        )
+        logger.debug(green('Houston, we have a click button (element is clickable)'))
+
+        # Find the form element that contains the button
+        #form = driver.find_element(By.XPATH, '/html/body/div[1]/div/div/div/div[2]/div[2]/div[2]')
+        logger.debug(green('Found the form'))
+
+        # Click the button or submit the form, depending on your use case
+        # post_button.click()
+
+        driver.execute_script('document.querySelector(".btn-post > button").click()')
+        logger.debug(green('The click has occurred'))
+
     except ElementClickInterceptedException:
         logger.debug(green("Trying to click on the button again"))
         driver.execute_script('document.querySelector(".btn-post > button").click()')
+    except Exception as e:
+        logger.debug(red('Unhandled Exception!'))
+        print(e)
+        print(e.args)
 
-    # waits for the video to upload
-    post_confirmation = EC.presence_of_element_located(
+    post_confirmation = EC.visibility_of_element_located(
         (By.XPATH, config['selectors']['upload']['post_confirmation'])
         )
-    WebDriverWait(driver, config['explicit_wait']).until(post_confirmation)
+
+    manage_posts = WebDriverWait(driver, config['explicit_wait']).until(post_confirmation)
+    manage_posts.click()
 
     logger.debug(green('Video posted successfully'))
 
